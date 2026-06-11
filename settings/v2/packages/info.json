@@ -1,0 +1,19 @@
+{
+  "packages": {
+    "builder": {
+      "version": "",
+      "path": "",
+      "enable": true
+    },
+    "scene": {
+      "version": "",
+      "path": "",
+      "enable": true
+    },
+    "engine": {
+      "version": "",
+      "path": "",
+      "enable": true
+    }
+  }
+}

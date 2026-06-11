@@ -1,0 +1,10 @@
+node_modules/
+library/
+temp/
+local/
+build/
+native/
+.idea/
+*.log
+*.meta.backup
+profiles/v2/packages/builder.json

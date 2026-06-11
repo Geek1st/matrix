@@ -1,0 +1,26 @@
+{
+  "engine": {
+    "modules": [
+      "2d",
+      "animation",
+      "audio",
+      "cocos-creator",
+      "core",
+      "dragon-bones",
+      "geometry-renderer",
+      "gfx-webgl",
+      "intersection-2d",
+      "particle-2d",
+      "physics-2d-box2d",
+      "profiler",
+      "spine",
+      "tiled-map",
+      "tween",
+      "ui",
+      "video",
+      "webview"
+    ]
+  },
+  "macroConfig": {},
+  "__version__": "1.0.12"
+}

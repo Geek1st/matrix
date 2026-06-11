@@ -1,0 +1,92 @@
+{
+  // =====================================================
+  // Matrix Match-3 — VS Code 全链路开发配置
+  // =====================================================
+
+  // TypeScript
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.preferences.importModuleSpecifier": "relative",
+
+  // 编辑器
+  "editor.tabSize": 4,
+  "editor.insertSpaces": true,
+  "editor.detectIndentation": false,
+  "editor.formatOnSave": false,
+  "editor.rulers": [100],
+  "editor.minimap.enabled": false,
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": true,
+
+  // 文件关联 — Cocos Creator JSON 文件高亮
+  "files.associations": {
+    "*.scene": "jsonc",
+    "*.prefab": "jsonc",
+    "*.meta": "jsonc",
+    "*.anim": "jsonc",
+    "*.fire": "jsonc",
+    "*.pac": "jsonc"
+  },
+
+  // 隐藏 Cocos 内部文件
+  "files.exclude": {
+    "**/.git": true,
+    "library/": true,
+    "temp/": true,
+    "local/": true,
+    "native/": true,
+    "**/*.meta": false
+  },
+
+  // 搜索排除
+  "search.exclude": {
+    "library/": true,
+    "temp/": true,
+    "build/": true,
+    "node_modules/": true,
+    "package-lock.json": true
+  },
+
+  // 文件监视排除 (减少 CPU 占用)
+  "files.watcherExclude": {
+    "library/**": true,
+    "temp/**": true,
+    "build/**": true,
+    "node_modules/**": true
+  },
+
+  // 拼写检查
+  "cSpell.words": [
+    "ccclass",
+    "cocos",
+    "dashscope",
+    "gameplay",
+    "gameover",
+    "miniprogram",
+    "prefab",
+    "prefabs",
+    "qwen",
+    "tween",
+    "wechat",
+    "wechatgame",
+    "winget"
+  ],
+
+  // 终端
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "terminal.integrated.env.windows": {
+    "NODE_ENV": "development"
+  },
+
+  // Task 完成提示
+  "task.autoDetect": "on",
+  "task.problemMatchers.neverPrompt": false,
+
+  // 调试工具栏
+  "debug.toolBarLocation": "docked",
+
+  // Live Server 预览 Web Mobile
+  "liveServer.settings.root": "/build/web-mobile",
+  "liveServer.settings.port": 7456,
+  "liveServer.settings.CustomBrowser": "chrome"
+}

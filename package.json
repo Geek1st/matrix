@@ -1,0 +1,22 @@
+{
+  "name": "matrix-mini-game",
+  "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "version": "1.0.0",
+  "description": "AI-powered Match-3 mini game — Cocos Creator + TypeScript + AI Agent",
+  "creator": {
+    "version": "3.8.8"
+  },
+  "scripts": {
+    "detect": "pwsh -NoProfile -File scripts/detect.ps1",
+    "build": "pwsh -NoProfile -File scripts/build.ps1",
+    "build:debug": "pwsh -NoProfile -File scripts/build.ps1 -Debug",
+    "preview": "pwsh -NoProfile -File scripts/preview.ps1",
+    "deploy": "pwsh -NoProfile -File scripts/deploy.ps1",
+    "typecheck": "npx tsc --noEmit",
+    "typewatch": "npx tsc --noEmit --watch"
+  },
+  "devDependencies": {
+    "@cocos/creator-types": "^3.8.7",
+    "typescript": "^5.4.0"
+  }
+}

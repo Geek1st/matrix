@@ -1,0 +1,89 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "环境检测",
+      "detail": "检测 Cocos Creator / 微信开发者工具 / Node.js / TypeScript",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "${workspaceFolder}\\scripts\\detect.ps1"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "new", "focus": false }
+    },
+    {
+      "label": "构建: 微信小游戏",
+      "detail": "tsc 检查 -> Cocos Creator 构建 -> build/wechatgame/",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "${workspaceFolder}\\scripts\\build.ps1", "-Platform", "wechatgame"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "always", "panel": "new" }
+    },
+    {
+      "label": "构建: Web Mobile (调试)",
+      "detail": "tsc 检查 -> Cocos Creator 构建 -> build/web-mobile/",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "${workspaceFolder}\\scripts\\build.ps1", "-Platform", "web-mobile", "-Debug"],
+      "group": "build",
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "always", "panel": "new" }
+    },
+    {
+      "label": "构建: Web Desktop",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "${workspaceFolder}\\scripts\\build.ps1", "-Platform", "web-desktop"],
+      "group": "build",
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "always", "panel": "new" }
+    },
+    {
+      "label": "部署: 微信开发者工具",
+      "detail": "构建后自动打开微信开发者工具",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "${workspaceFolder}\\scripts\\deploy.ps1"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "new" }
+    },
+    {
+      "label": "预览: 浏览器",
+      "detail": "本地 HTTP 服务器预览构建产物",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "${workspaceFolder}\\scripts\\preview.ps1"],
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "new" }
+    },
+    {
+      "label": "TypeScript: 类型检查",
+      "detail": "仅检查类型，不产出文件",
+      "type": "shell",
+      "command": "npx tsc --noEmit",
+      "group": "build",
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "silent", "panel": "shared" }
+    },
+    {
+      "label": "TypeScript: 监视模式",
+      "detail": "文件改动自动类型检查 (后台)",
+      "type": "shell",
+      "command": "npx tsc --noEmit --watch",
+      "isBackground": true,
+      "problemMatcher": ["$tsc-watch"],
+      "presentation": { "reveal": "never" }
+    },
+    {
+      "label": "清理构建产物",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-Command", "Remove-Item -Path build,library,temp,local -Recurse -Force -ErrorAction SilentlyContinue; Write-Host '[OK] Cleaned'"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    }
+  ]
+}

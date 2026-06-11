@@ -1,0 +1,39 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "🚀 启动调试 (TS 编译 + Chrome)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/debug-runner.js",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "openOnSessionStart",
+      "presentation": { "hidden": false, "group": "debug-debugger" }
+    },
+    {
+      "name": "🔨 TS 构建检查 + Chrome 打开",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile", "-Command",
+        "cd '${workspaceFolder}'; npx tsc --noEmit; Write-Host '=== TS Check Done ===' -ForegroundColor Green; Write-Host 'Cocos Creator not installed yet - build web-mobile first from Cocos GUI' -ForegroundColor Yellow"
+      ],
+      "console": "integratedTerminal",
+      "presentation": { "hidden": false, "group": "debug" }
+    },
+    {
+      "name": "🌐 Chrome 调试游戏 (需先构建)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:7456",
+      "webRoot": "${workspaceFolder}/build/web-mobile",
+      "sourceMaps": true,
+      "sourceMapPathOverrides": {
+        "cocos://*": "${workspaceFolder}/assets/*",
+        "db://assets/*": "${workspaceFolder}/assets/*"
+      },
+      "presentation": { "hidden": false, "group": "debug" }
+    }
+  ]
+}

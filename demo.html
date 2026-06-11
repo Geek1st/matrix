@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matrix Match-3 Demo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #fff;
+            overflow: hidden;
+        }
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 0 20px rgba(0, 200, 255, 0.5);
+        }
+        #hud {
+            display: flex;
+            gap: 2rem;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+        }
+        #hud span { opacity: 0.9; }
+        #hud .value { font-weight: bold; color: #ffd700; }
+        #game-canvas {
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            box-shadow: 0 0 40px rgba(0, 100, 255, 0.3);
+            cursor: pointer;
+            touch-action: none;
+        }
+        #status {
+            margin-top: 1rem;
+            font-size: 1rem;
+            opacity: 0.8;
+            min-height: 1.5em;
+        }
+        #combo-display {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 3rem;
+            font-weight: bold;
+            color: #ff6600;
+            text-shadow: 0 0 20px #ff6600;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        #game-over {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        #game-over h2 { font-size: 3rem; color: #ff4444; margin-bottom: 1rem; }
+        #game-over p { font-size: 1.5rem; margin-bottom: 2rem; }
+        #game-over button {
+            padding: 12px 32px;
+            font-size: 1.2rem;
+            background: #4488ff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        #game-over button:hover { background: #5599ff; }
+    </style>
+</head>
+<body>
+    <h1>🎮 Matrix Match-3</h1>
+    <div id="hud">
+        <span>分数: <span class="value" id="score">0</span></span>
+        <span>步数: <span class="value" id="moves">30</span></span>
+        <span>连击: <span class="value" id="combo">0</span></span>
+        <button id="hint-btn" onclick="showHint()" style="padding: 4px 12px; margin-left: 1rem; background: #4488ff; color: #fff; border: none; border-radius: 4px; cursor: pointer;">💡 提示</button>
+    </div>
+    <canvas id="game-canvas"></canvas>
+    <div id="status">滑动或点击交换相邻宝石，三连消除得分！</div>
+    <div id="combo-display"></div>
+    <div id="game-over">
+        <h2>游戏结束!</h2>
+        <p>最终得分: <span id="final-score">0</span></p>
+        <button onclick="restartGame()">重新开始</button>
+    </div>
+
+    <script src="audio-system.js"></script>
+    <script src="responsive-layout.js"></script>
+    <script src="session-persistence.js"></script>
+    <script src="animation-system.js"></script>
+    <script>
+    // ============================================================
+    // Matrix Match-3 — 独立 Demo (纯 JS + Canvas)
+    // 验证核心游戏逻辑，不依赖 Cocos Creator
+    // ============================================================
+
+    const COLS = 6, ROWS = 6, CELL = 80, PAD = 4;
+    const GEM_COLORS = ['#FF4444','#4488FF','#44CC44','#FFCC00','#CC44FF','#FF8844'];
+    const GEM_SHAPES = ['circle','diamond','square','triangle','star','hexagon'];
+    const MAX_MOVES = 30;
+
+    const gameCanvas = document.getElementById('game-canvas');
+    const ctx = gameCanvas.getContext('2d');
+    
+    // Initialize managers
+    const audioManager = new AudioManager();
+    const sessionManager = new SessionManager();
+    const responsiveManager = new ResponsiveManager(gameCanvas, gameCanvas.parentElement);
+    const touchFeedback = new TouchFeedback(gameCanvas);
+    const animationManager = new AnimationManager();
+    const scorePopups = [];
+    
+    // ISSUE-15: devicePixelRatio 适配高 DPI 屏幕
+    const dpr = window.devicePixelRatio || 1;
+    const width = COLS * CELL + PAD * 2;
+    const height = ROWS * CELL + PAD * 2;
+    
+    gameCanvas.width = width * dpr;
+    gameCanvas.height = height * dpr;
+    gameCanvas.style.width = width + 'px';
+    gameCanvas.style.height = height + 'px';
+    ctx.scale(dpr, dpr);
+
+    // Game state
+    let board = [];
+    let score = 0;
+    let movesLeft = MAX_MOVES;
+    let comboCount = 0;
+    let selectedGem = null;
+    let isProcessing = false;
+    let gameOver = false;
+
+    // Try to load saved game
+    const savedState = sessionManager.loadGameState();
+    if (savedState && !savedState.gameOver) {
+        board = savedState.board;
+        score = savedState.score;
+        movesLeft = savedState.movesLeft;
+        comboCount = savedState.comboCount;
+        console.log('[Game] 已恢复存档');
+    }
+
+    // ============================================================
+    // Gem class with special types
+    // ============================================================
+    class Gem {
+        constructor(x, y, type) {
+            this.x = x;
+            this.y = y;
+            this.type = type;
+            this.isMatched = false;
+            this.specialType = null; // null, 'striped-h', 'striped-v', 'rainbow'
+            this.alpha = 1;
+            this.scale = 1;
+            this.displayX = null;
+            this.displayY = null;
+        }
+        static randomType() { return Math.floor(Math.random() * GEM_COLORS.length); }
+    }
+
+    // ============================================================
+    // MatchDetector — 双遍扫描 + 特殊宝石检测
+    // ============================================================
+    class MatchDetector {
+        static findMatches(b) {
+            const cols = b.length, rows = b[0].length;
+            const matches = [];
+
+            // Horizontal
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const gem = b[c]?.[r];
+                    if (!gem) continue;
+                    let len = 1;
+                    while (c + len < cols && b[c + len]?.[r]?.type === gem.type) len++;
+                    if (len >= 3) {
+                        const group = [];
+                        for (let i = 0; i < len; i++) {
+                            group.push(b[c + i][r]);
+                        }
+                        matches.push({ 
+                            gems: group, 
+                            direction: 'horizontal', 
+                            count: len,
+                            createAt: { x: c + Math.floor(len / 2), y: r } // 中心位置
+                        });
+                        c += len - 1;
+                    }
+                }
+            }
+            // Vertical
+            for (let c = 0; c < cols; c++) {
+                for (let r = 0; r < rows; r++) {
+                    const gem = b[c]?.[r];
+                    if (!gem) continue;
+                    let len = 1;
+                    while (r + len < rows && b[c]?.[r + len]?.type === gem.type) len++;
+                    if (len >= 3) {
+                        const group = [];
+                        for (let i = 0; i < len; i++) {
+                            group.push(b[c][r + i]);
+                        }
+                        matches.push({ 
+                            gems: group, 
+                            direction: 'vertical', 
+                            count: len,
+                            createAt: { x: c, y: r + Math.floor(len / 2) }
+                        });
+                        r += len - 1;
+                    }
+                }
+            }
+            return matches;
+        }
+
+        // 创建特殊宝石
+        static createSpecialGem(match, board) {
+            const { count, direction, createAt, gems } = match;
+            const baseGem = gems[0];
+            
+            // 4 连 -> 条纹宝石
+            if (count === 4) {
+                const specialGem = new Gem(createAt.x, createAt.y, baseGem.type);
+                specialGem.specialType = direction === 'horizontal' ? 'striped-v' : 'striped-h';
+                return specialGem;
+            }
+            
+            // 5 连 -> 彩虹宝石
+            if (count >= 5) {
+                const specialGem = new Gem(createAt.x, createAt.y, baseGem.type);
+                specialGem.specialType = 'rainbow';
+                return specialGem;
+            }
+            
+            return null;
+        }
+
+        // 激活特殊宝石效果
+        static activateSpecialGem(gem, board) {
+            if (!gem.specialType) return [];
+            
+            const affected = [];
+            const cols = board.length, rows = board[0].length;
+            
+            if (gem.specialType === 'striped-h') {
+                // 横向条纹：清除整行
+                for (let c = 0; c < cols; c++) {
+                    if (board[c][gem.y]) {
+                        affected.push(board[c][gem.y]);
+                    }
+                }
+            } else if (gem.specialType === 'striped-v') {
+                // 纵向条纹：清除整列
+                for (let r = 0; r < rows; r++) {
+                    if (board[gem.x][r]) {
+                        affected.push(board[gem.x][r]);
+                    }
+                }
+            } else if (gem.specialType === 'rainbow') {
+                // 彩虹：清除所有同色宝石
+                for (let c = 0; c < cols; c++) {
+                    for (let r = 0; r < rows; r++) {
+                        const g = board[c][r];
+                        if (g && g.type === gem.type) {
+                            affected.push(g);
+                        }
+                    }
+                }
+            }
+            
+            return affected;
+        }
+    }
+
+    // ============================================================
+    // DeadlockChecker
+    // ============================================================
+    class DeadlockChecker {
+        static hasValidMoves(b) {
+            for (let c = 0; c < b.length; c++) {
+                for (let r = 0; r < b[0].length; r++) {
+                    if (c + 1 < b.length && this.simulateSwap(b, b[c][r], b[c+1][r])) return true;
+                    if (r + 1 < b[0].length && this.simulateSwap(b, b[c][r], b[c][r+1])) return true;
+                }
+            }
+            return false;
+        }
+
+        static findValidMoves(b) {
+            const moves = [];
+            const seen = new Set();
+            for (let c = 0; c < b.length; c++) {
+                for (let r = 0; r < b[0].length; r++) {
+                    if (c + 1 < b.length) {
+                        const key = `${c},${r}-${c+1},${r}`;
+                        if (!seen.has(key) && this.simulateSwap(b, b[c][r], b[c+1][r])) {
+                            seen.add(key);
+                            moves.push({ gem1: b[c][r], gem2: b[c+1][r] });
+                        }
+                    }
+                    if (r + 1 < b[0].length) {
+                        const key = `${c},${r}-${c},${r+1}`;
+                        if (!seen.has(key) && this.simulateSwap(b, b[c][r], b[c][r+1])) {
+                            seen.add(key);
+                            moves.push({ gem1: b[c][r], gem2: b[c][r+1] });
+                        }
+                    }
+                }
+            }
+            return moves;
+        }
+
+        static simulateSwap(b, g1, g2) {
+            if (!g1 || !g2) return false;
+            const x1 = g1.x, y1 = g1.y, x2 = g2.x, y2 = g2.y;
+            b[x1][y1] = g2; b[x2][y2] = g1;
+            g1.x = x2; g1.y = y2; g2.x = x1; g2.y = y1;
+            const result = this.checkMatches(b, g2.x, g2.y) || this.checkMatches(b, g1.x, g1.y);
+            b[x1][y1] = g1; b[x2][y2] = g2;
+            g1.x = x1; g1.y = y1; g2.x = x2; g2.y = y2;
+            return result;
+        }
+
+        static checkMatches(b, col, row) {
+            const gem = b[col]?.[row];
+            if (!gem) return false;
+            const type = gem.type;
+            // Horizontal
+            let hCount = 1, c = col - 1;
+            while (c >= 0 && b[c]?.[row]?.type === type) { hCount++; c--; }
+            c = col + 1;
+            while (c < b.length && b[c]?.[row]?.type === type) { hCount++; c++; }
+            if (hCount >= 3) return true;
+            // Vertical
+            let vCount = 1, r = row - 1;
+            while (r >= 0 && b[col]?.[r]?.type === type) { vCount++; r--; }
+            r = row + 1;
+            while (r < b[0].length && b[col]?.[r]?.type === type) { vCount++; r++; }
+            return vCount >= 3;
+        }
+
+        static removeInitialMatches(b) {
+            let hasMatch = true, iter = 0;
+            while (hasMatch && iter < 100) {
+                hasMatch = false; iter++;
+                // ISSUE-08 fix: batch collect then replace
+                const toReplace = [];
+                for (let r = 0; r < b[0].length; r++) {
+                    for (let c = 0; c < b.length; c++) {
+                        const gem = b[c]?.[r];
+                        if (!gem) continue;
+                        if (c + 2 < b.length && b[c+1]?.[r]?.type === gem.type && b[c+2]?.[r]?.type === gem.type) {
+                            toReplace.push(`${c},${r}`); hasMatch = true;
+                        }
+                        if (r + 2 < b[0].length && b[c]?.[r+1]?.type === gem.type && b[c]?.[r+2]?.type === gem.type) {
+                            toReplace.push(`${c},${r}`); hasMatch = true;
+                        }
+                    }
+                }
+                const replaced = new Set();
+                for (const key of toReplace) {
+                    if (!replaced.has(key)) {
+                        replaced.add(key);
+                        const [c, r] = key.split(',').map(Number);
+                        if (b[c]?.[r]) b[c][r].type = Gem.randomType();
+                    }
+                }
+            }
+        }
+
+        static ensureSolvable(b) {
+            let safety = 0;
+            while (!DeadlockChecker.hasValidMoves(b) && safety < 50) {
+                safety++;
+                // ISSUE-09 fix: Fisher-Yates shuffle then replace 30%
+                const allGems = [];
+                for (let c = 0; c < b.length; c++)
+                    for (let r = 0; r < b[0].length; r++)
+                        if (b[c]?.[r]) allGems.push({ c, r });
+                for (let i = allGems.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [allGems[i], allGems[j]] = [allGems[j], allGems[i]];
+                }
+                const count = Math.ceil(allGems.length * 0.3);
+                for (let i = 0; i < count && i < allGems.length; i++) {
+                    const { c, r } = allGems[i];
+                    if (b[c]?.[r]) b[c][r].type = Gem.randomType();
+                }
+                this.removeInitialMatches(b);
+            }
+            // Fallback: full reset if still unsolvable
+            if (!DeadlockChecker.hasValidMoves(b)) {
+                for (let c = 0; c < b.length; c++)
+                    for (let r = 0; r < b[0].length; r++)
+                        if (b[c]?.[r]) b[c][r].type = Gem.randomType();
+                this.removeInitialMatches(b);
+            }
+        }
+    }
+
+    // ============================================================
+    // Init board
+    // ============================================================
+    function initBoard() {
+        board = [];
+        for (let c = 0; c < COLS; c++) {
+            board[c] = [];
+            for (let r = 0; r < ROWS; r++) {
+                board[c][r] = new Gem(c, r, Gem.randomType());
+            }
+        }
+        DeadlockChecker.removeInitialMatches(board);
+        DeadlockChecker.ensureSolvable(board);
+    }
+
+    // ============================================================
+    // Rendering
+    // ============================================================
+    function drawBoard() {
+        ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+
+        // Background grid
+        for (let c = 0; c < COLS; c++) {
+            for (let r = 0; r < ROWS; r++) {
+                const x = PAD + c * CELL;
+                const y = PAD + (ROWS - 1 - r) * CELL;
+                ctx.fillStyle = (c + r) % 2 === 0 ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)';
+                ctx.fillRect(x, y, CELL, CELL);
+            }
+        }
+
+        // Gems
+        for (let c = 0; c < COLS; c++) {
+            for (let r = 0; r < ROWS; r++) {
+                const gem = board[c]?.[r];
+                if (!gem) continue;
+                const x = PAD + c * CELL + CELL / 2;
+                const y = PAD + (ROWS - 1 - r) * CELL + CELL / 2;
+                const radius = CELL / 2 - 8;
+
+                // Matched highlight (fade out)
+                if (gem.isMatched) {
+                    ctx.globalAlpha = 0.4;
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius + 2, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                // Selected highlight
+                if (selectedGem === gem) {
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius + 4, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                drawGemShape(x, y, radius, gem.type, gem.specialType);
+                
+                if (gem.isMatched) {
+                    ctx.globalAlpha = 1.0;
+                }
+            }
+        }
+
+        // Draw touch feedback
+        touchFeedback.update();
+        touchFeedback.draw(ctx);
+
+        // Draw particles
+        animationManager.renderParticles(ctx);
+
+        // Draw score popups
+        scorePopups.forEach(popup => {
+            if (popup.update()) {
+                popup.render(ctx);
+            }
+        });
+        // Clean up expired popups
+        for (let i = scorePopups.length - 1; i >= 0; i--) {
+            if (!scorePopups[i].update()) {
+                scorePopups.splice(i, 1);
+            }
+        }
+    }
+
+    function drawGemShape(x, y, radius, type, specialType = null) {
+        const color = GEM_COLORS[type];
+        ctx.fillStyle = color;
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 2;
+
+        // Draw base shape
+        switch (type) {
+            case 0: // Circle
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                break;
+            case 1: // Diamond
+                ctx.beginPath();
+                ctx.moveTo(x, y - radius);
+                ctx.lineTo(x + radius, y);
+                ctx.lineTo(x, y + radius);
+                ctx.lineTo(x - radius, y);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                break;
+            case 2: // Square
+                ctx.fillRect(x - radius * 0.8, y - radius * 0.8, radius * 1.6, radius * 1.6);
+                ctx.strokeRect(x - radius * 0.8, y - radius * 0.8, radius * 1.6, radius * 1.6);
+                break;
+            case 3: // Triangle
+                ctx.beginPath();
+                ctx.moveTo(x, y - radius);
+                ctx.lineTo(x + radius, y + radius * 0.7);
+                ctx.lineTo(x - radius, y + radius * 0.7);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                break;
+            case 4: // Star
+                drawStar(x, y, 5, radius, radius * 0.5);
+                ctx.fill();
+                ctx.stroke();
+                break;
+            case 5: // Hexagon
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const angle = (Math.PI / 3) * i - Math.PI / 6;
+                    const px = x + radius * Math.cos(angle);
+                    const py = y + radius * Math.sin(angle);
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                break;
+        }
+
+        // H4: Draw special gem effects
+        if (specialType === 'striped-h') {
+            // Horizontal stripes
+            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+            ctx.lineWidth = 3;
+            for (let i = -2; i <= 2; i++) {
+                const lineY = y + i * (radius * 0.3);
+                ctx.beginPath();
+                ctx.moveTo(x - radius * 0.8, lineY);
+                ctx.lineTo(x + radius * 0.8, lineY);
+                ctx.stroke();
+            }
+        } else if (specialType === 'striped-v') {
+            // Vertical stripes
+            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+            ctx.lineWidth = 3;
+            for (let i = -2; i <= 2; i++) {
+                const lineX = x + i * (radius * 0.3);
+                ctx.beginPath();
+                ctx.moveTo(lineX, y - radius * 0.8);
+                ctx.lineTo(lineX, y + radius * 0.8);
+                ctx.stroke();
+            }
+        } else if (specialType === 'rainbow') {
+            // Rainbow gradient overlay
+            const rainbowGrad = ctx.createLinearGradient(x - radius, y - radius, x + radius, y + radius);
+            rainbowGrad.addColorStop(0, 'rgba(255,0,0,0.6)');
+            rainbowGrad.addColorStop(0.2, 'rgba(255,255,0,0.6)');
+            rainbowGrad.addColorStop(0.4, 'rgba(0,255,0,0.6)');
+            rainbowGrad.addColorStop(0.6, 'rgba(0,255,255,0.6)');
+            rainbowGrad.addColorStop(0.8, 'rgba(0,0,255,0.6)');
+            rainbowGrad.addColorStop(1, 'rgba(255,0,255,0.6)');
+            ctx.fillStyle = rainbowGrad;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Sparkle effect
+            ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+            ctx.lineWidth = 2;
+            drawStar(x, y, 8, radius * 0.6, radius * 0.3);
+            ctx.stroke();
+        }
+
+        // Inner glow (skip for rainbow to avoid overlap)
+        if (specialType !== 'rainbow') {
+            const grad = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, 0, x, y, radius);
+            grad.addColorStop(0, 'rgba(255,255,255,0.4)');
+            grad.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    function drawStar(cx, cy, spikes, outerR, innerR) {
+        let rot = Math.PI / 2 * 3;
+        const step = Math.PI / spikes;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - outerR);
+        for (let i = 0; i < spikes; i++) {
+            ctx.lineTo(cx + Math.cos(rot) * outerR, cy + Math.sin(rot) * outerR);
+            rot += step;
+            ctx.lineTo(cx + Math.cos(rot) * innerR, cy + Math.sin(rot) * innerR);
+            rot += step;
+        }
+        ctx.lineTo(cx, cy - outerR);
+        ctx.closePath();
+    }
+
+    // ============================================================
+    // Game logic
+    // ============================================================
+    async function attemptSwap(gem1, gem2) {
+        if (isProcessing || gameOver) return;
+        isProcessing = true;
+        selectedGem = null;
+
+        try {
+            // Input feedback
+            gameCanvas.style.cursor = 'wait';
+            document.getElementById('status').textContent = '处理中...';
+
+            // Play swap sound
+            audioManager.playSound('swap');
+
+            // Animate swap (B1)
+            await animationManager.animateSwap(gem1, gem2);
+
+            // Swap data
+            swapGemsData(gem1, gem2);
+            drawBoard();
+
+            const matches = MatchDetector.findMatches(board);
+            if (matches.length > 0) {
+                movesLeft--;
+                comboCount = 0;
+                await processCascade();
+                updateHUD();
+                // Save game state
+                sessionManager.saveGameState({
+                    board, score, movesLeft, comboCount, gameOver
+                });
+                checkGameOver();
+            } else {
+                // Invalid swap - play error sound
+                audioManager.playSound('invalid');
+                // Animate swap back
+                await animationManager.animateSwap(gem1, gem2);
+                swapGemsData(gem1, gem2);
+                drawBoard();
+            }
+        } finally {
+            // Exception protection
+            isProcessing = false;
+            gameCanvas.style.cursor = 'pointer';
+            if (!gameOver) {
+                document.getElementById('status').textContent = '滑动或点击交换相邻宝石，三连消除得分！';
+            }
+        }
+    }
+
+    function swapGemsData(g1, g2) {
+        board[g1.x][g1.y] = g2;
+        board[g2.x][g2.y] = g1;
+        const tx = g1.x, ty = g1.y;
+        g1.x = g2.x; g1.y = g2.y;
+        g2.x = tx; g2.y = ty;
+    }
+
+    async function processCascade() {
+        let hasMatches = true;
+        let cascadeIterations = 0;
+        const MAX_CASCADE_ITERATIONS = 100;
+        
+        while (hasMatches && cascadeIterations < MAX_CASCADE_ITERATIONS) {
+            cascadeIterations++;
+            const matches = MatchDetector.findMatches(board);
+            if (matches.length === 0) { hasMatches = false; break; }
+
+            comboCount++;
+            let roundScore = 0;
+
+            // Play match sound with combo pitch
+            audioManager.playComboSound(comboCount);
+
+            // Mark matched and calculate score
+            const matchedSet = new Set();
+            const matchPositions = [];
+            const specialGemsToCreate = [];
+            
+            for (const m of matches) {
+                // H1: Check if we should create a special gem
+                const specialGem = MatchDetector.createSpecialGem(m, board);
+                if (specialGem) {
+                    specialGemsToCreate.push(specialGem);
+                }
+                
+                for (const g of m.gems) {
+                    // H2: Activate special gem effects
+                    if (g.specialType) {
+                        const affected = MatchDetector.activateSpecialGem(g, board);
+                        affected.forEach(ag => matchedSet.add(ag));
+                    }
+                    g.isMatched = true;
+                    matchedSet.add(g);
+                    matchPositions.push({
+                        x: PAD + g.x * CELL + CELL / 2,
+                        y: PAD + (ROWS - 1 - g.y) * CELL + CELL / 2,
+                        color: GEM_COLORS[g.type]
+                    });
+                }
+                roundScore += m.count * m.count * comboCount;
+            }
+            score += roundScore;
+
+            // Show score popup (D1)
+            if (matchPositions.length > 0) {
+                const avgX = matchPositions.reduce((sum, p) => sum + p.x, 0) / matchPositions.length;
+                const avgY = matchPositions.reduce((sum, p) => sum + p.y, 0) / matchPositions.length;
+                scorePopups.push(new ScorePopup(avgX, avgY, roundScore));
+            }
+
+            // Animate explosion effects (B3)
+            const explosionPromises = matchPositions.map(pos => 
+                animationManager.animateExplosion(pos.x, pos.y, pos.color)
+            );
+
+            // Show combo display
+            drawBoard();
+            if (comboCount > 1) showCombo(comboCount);
+            await sleep(200);
+
+            // Remove matched gems
+            for (const g of matchedSet) {
+                board[g.x][g.y] = null;
+            }
+            
+            // H3: Place special gems
+            for (const sg of specialGemsToCreate) {
+                if (!board[sg.x][sg.y]) {
+                    board[sg.x][sg.y] = sg;
+                }
+            }
+
+            // Gravity with fall animation (B2)
+            const fallPromises = [];
+            for (let c = 0; c < COLS; c++) {
+                let writeRow = 0;
+                for (let r = 0; r < ROWS; r++) {
+                    if (board[c][r]) {
+                        if (r !== writeRow) {
+                            const gem = board[c][r];
+                            const fromY = r;
+                            board[c][writeRow] = gem;
+                            board[c][r] = null;
+                            gem.y = writeRow;
+                            // Animate fall
+                            fallPromises.push(
+                                animationManager.animateFall(
+                                    gem,
+                                    PAD + (ROWS - 1 - fromY) * CELL + CELL / 2,
+                                    PAD + (ROWS - 1 - writeRow) * CELL + CELL / 2
+                                )
+                            );
+                        }
+                        writeRow++;
+                    }
+                }
+            }
+
+            // Spawn new gems with animation
+            for (let c = 0; c < COLS; c++) {
+                for (let r = 0; r < ROWS; r++) {
+                    if (!board[c][r]) {
+                        const newGem = new Gem(c, r, Gem.randomType());
+                        board[c][r] = newGem;
+                        // Animate from top
+                        fallPromises.push(
+                            animationManager.animateFall(
+                                newGem,
+                                -CELL,
+                                PAD + (ROWS - 1 - r) * CELL + CELL / 2
+                            )
+                        );
+                    }
+                }
+            }
+
+            // Wait for all animations
+            await Promise.all([...explosionPromises, ...fallPromises]);
+
+            drawBoard();
+            updateHUD();
+            await sleep(100);
+        }
+
+        // Ensure solvable
+        if (!DeadlockChecker.hasValidMoves(board)) {
+            document.getElementById('status').textContent = '无合法走法，重新洗牌...';
+            DeadlockChecker.ensureSolvable(board);
+            drawBoard();
+            await sleep(500);
+            document.getElementById('status').textContent = '滑动或点击交换相邻宝石，三连消除得分！';
+        }
+    }
+
+    function showCombo(count) {
+        const el = document.getElementById('combo-display');
+        el.textContent = `${count} COMBO!`;
+        el.style.opacity = '1';
+        el.style.transform = 'translate(-50%, -50%) scale(1.5)';
+        el.style.transition = 'all 0.3s ease-out';
+        
+        setTimeout(() => {
+            el.style.transform = 'translate(-50%, -50%) scale(1)';
+        }, 100);
+        
+        setTimeout(() => {
+            el.style.opacity = '0';
+        }, 800);
+
+        // Screen shake for big combos (D2 enhancement)
+        if (count >= 3) {
+            shakeScreen(count * 2);
+        }
+    }
+
+    // D2: Screen shake effect for combos
+    function shakeScreen(intensity = 5) {
+        const canvas = document.getElementById('game-canvas');
+        const originalTransform = canvas.style.transform;
+        let shakeCount = 0;
+        const shakeInterval = setInterval(() => {
+            const dx = (Math.random() - 0.5) * intensity;
+            const dy = (Math.random() - 0.5) * intensity;
+            canvas.style.transform = `translate(${dx}px, ${dy}px)`;
+            shakeCount++;
+            if (shakeCount > 10) {
+                clearInterval(shakeInterval);
+                canvas.style.transform = originalTransform;
+            }
+        }, 30);
+    }
+
+    // D3: Highlight valid moves
+    function highlightValidMoves() {
+        const validMoves = DeadlockChecker.findValidMoves(board);
+        if (validMoves.length === 0) return [];
+        
+        // Highlight gems that can form matches
+        const highlightedGems = new Set();
+        validMoves.forEach(move => {
+            highlightedGems.add(move.gem1);
+            highlightedGems.add(move.gem2);
+        });
+        
+        return Array.from(highlightedGems);
+    }
+
+    // D4: Show hint button functionality
+    function showHint() {
+        const validMoves = DeadlockChecker.findValidMoves(board);
+        if (validMoves.length === 0) {
+            document.getElementById('status').textContent = '没有可用的提示！';
+            return;
+        }
+        
+        const hintMove = validMoves[Math.floor(Math.random() * validMoves.length)];
+        const gem1 = hintMove.gem1;
+        const gem2 = hintMove.gem2;
+        
+        // Flash the gems
+        const originalAlpha1 = gem1.alpha || 1;
+        const originalAlpha2 = gem2.alpha || 1;
+        
+        let flashCount = 0;
+        const flashInterval = setInterval(() => {
+            gem1.alpha = flashCount % 2 === 0 ? 0.5 : 1;
+            gem2.alpha = flashCount % 2 === 0 ? 0.5 : 1;
+            drawBoard();
+            flashCount++;
+            if (flashCount >= 6) {
+                clearInterval(flashInterval);
+                gem1.alpha = originalAlpha1;
+                gem2.alpha = originalAlpha2;
+                drawBoard();
+            }
+        }, 200);
+    }
+
+    function checkGameOver() {
+        if (movesLeft <= 0) {
+            gameOver = true;
+            document.getElementById('final-score').textContent = score;
+            document.getElementById('game-over').style.display = 'flex';
+        }
+    }
+
+    function restartGame() {
+        score = 0;
+        movesLeft = MAX_MOVES;
+        comboCount = 0;
+        gameOver = false;
+        selectedGem = null;
+        isProcessing = false;
+        document.getElementById('game-over').style.display = 'none';
+        initBoard();
+        drawBoard();
+        updateHUD();
+    }
+
+    function updateHUD() {
+        document.getElementById('score').textContent = score;
+        document.getElementById('moves').textContent = movesLeft;
+        document.getElementById('combo').textContent = comboCount;
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    // ============================================================
+    // Input handling
+    // ============================================================
+    function getGemAt(px, py) {
+        const col = Math.floor((px - PAD) / CELL);
+        const row = ROWS - 1 - Math.floor((py - PAD) / CELL);
+        if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return null;
+        return board[col]?.[row] || null;
+    }
+
+    function areAdjacent(g1, g2) {
+        const dx = Math.abs(g1.x - g2.x);
+        const dy = Math.abs(g1.y - g2.y);
+        return (dx + dy) === 1;
+    }
+
+    let touchStartPos = null;
+    let touchStartGem = null;
+
+    canvas.addEventListener('pointerdown', (e) => {
+        if (isProcessing || gameOver) return;
+        const rect = gameCanvas.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        const gem = getGemAt(px, py);
+        if (!gem) return;
+
+        touchStartPos = { x: px, y: py };
+        touchStartGem = gem;
+
+        if (selectedGem && areAdjacent(selectedGem, gem)) {
+            attemptSwap(selectedGem, gem);
+        } else {
+            selectedGem = gem;
+            drawBoard();
+        }
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+        if (!touchStartGem || !touchStartPos || isProcessing || gameOver) return;
+        const rect = gameCanvas.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        const dx = px - touchStartPos.x;
+        const dy = py - touchStartPos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > 20) {
+            let targetCol = touchStartGem.x;
+            let targetRow = touchStartGem.y;
+            if (Math.abs(dx) > Math.abs(dy)) {
+                targetCol += dx > 0 ? 1 : -1;
+            } else {
+                targetRow += dy > 0 ? -1 : 1; // Fixed: Y direction inverted (row 0 at bottom)
+            }
+            const target = board[targetCol]?.[targetRow] || null;
+            if (target) {
+                const gem = touchStartGem;
+                touchStartGem = null;
+                touchStartPos = null;
+                selectedGem = null;
+                attemptSwap(gem, target);
+            }
+        }
+    });
+
+    canvas.addEventListener('pointerup', () => {
+        touchStartPos = null;
+        // Don't clear touchStartGem here to allow tap-to-select
+    });
+
+    // ISSUE-16: Handle pointer release outside canvas
+    canvas.addEventListener('pointerleave', () => {
+        touchStartPos = null;
+        // Keep touchStartGem for tap-to-select, but clear swipe state
+    });
+
+    // Also handle global pointerup for edge cases (only if pointer left canvas)
+    window.addEventListener('pointerup', (e) => {
+        const rect = gameCanvas.getBoundingClientRect();
+        const onCanvas = (
+            e.clientX >= rect.left && e.clientX <= rect.right &&
+            e.clientY >= rect.top && e.clientY <= rect.bottom
+        );
+        if (!onCanvas) {
+            touchStartPos = null;
+            touchStartGem = null;
+        }
+    });
+
+    // ============================================================
+    // Start
+    // ============================================================
+    initBoard();
+    drawBoard();
+    updateHUD();
+    console.log('[Matrix Match-3 Demo] 游戏已启动！');
+    console.log('[Board] 合法走法:', DeadlockChecker.findValidMoves(board).length);
+    </script>
+</body>
+</html>
