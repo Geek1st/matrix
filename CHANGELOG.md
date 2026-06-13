@@ -5,6 +5,27 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.2.0] - 2026-06-12
+
+### 修复
+- **[P0] 修复动画渲染脱节**：`drawBoard()` 现在优先使用 `gem.displayX/displayY` 渲染动画位置，交换和下落动画实际可见
+- **[P0] 修复触摸坐标缩放**：`pointerdown/pointermove` 使用 `responsiveManager.screenToCanvas()` 转换坐标，移动端点击位置正确
+- **[P0] 修正文档虚假声明**：`demo-README.md` 中色盲模式、键盘导航、高对比度模式标注为"计划中"
+- **[P1] 修复 shakeScreen 与 ResponsiveManager transform 冲突**：震动效果保存/恢复原始 transform
+- **[P1] 修复 scorePopups 双重 update()**：合并为单次遍历，避免动画加速
+
+### 新增
+- **无效交换视觉反馈**：交换失败时宝石红色闪烁 + 轻微震动
+- **暂停/设置面板**：⏸ 暂停按钮 + 继续游戏/重新开始选项
+- **静音按钮**：🔊/🔇 切换音效开关
+- **交互式教程**：首次访问显示操作指南，localStorage 记录已读状态
+
+### 改进
+- `animateSwap` 改用像素坐标，与 `drawBoard` 渲染系统统一
+- 输入处理增加 `isPaused` 状态检查
+
+---
+
 ## [1.0.0] - 2026-06-11
 
 ### 新增

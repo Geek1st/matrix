@@ -6,13 +6,21 @@
     <title>Matrix Match-3 Demo</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
         body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 100vh;
             font-family: 'Segoe UI', Arial, sans-serif;
             color: #fff;
             overflow: hidden;
@@ -30,7 +38,15 @@
         }
         #hud span { opacity: 0.9; }
         #hud .value { font-weight: bold; color: #ffd700; }
+        #game-container {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
         #game-canvas {
+            display: block;
+            margin: 0 auto;
             border: 2px solid rgba(255,255,255,0.2);
             border-radius: 8px;
             box-shadow: 0 0 40px rgba(0, 100, 255, 0.3);
@@ -78,6 +94,30 @@
             cursor: pointer;
         }
         #game-over button:hover { background: #5599ff; }
+        #pause-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 90;
+        }
+        #pause-overlay h2 { font-size: 2.5rem; color: #fff; margin-bottom: 2rem; }
+        #pause-overlay button {
+            padding: 12px 32px;
+            font-size: 1.1rem;
+            margin: 0.5rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            color: #fff;
+        }
+        #pause-overlay .resume-btn { background: #44cc44; }
+        #pause-overlay .restart-btn { background: #ff6644; }
+        #pause-overlay .resume-btn:hover { background: #55dd55; }
+        #pause-overlay .restart-btn:hover { background: #ff7755; }
     </style>
 </head>
 <body>
@@ -87,14 +127,35 @@
         <span>步数: <span class="value" id="moves">30</span></span>
         <span>连击: <span class="value" id="combo">0</span></span>
         <button id="hint-btn" onclick="showHint()" style="padding: 4px 12px; margin-left: 1rem; background: #4488ff; color: #fff; border: none; border-radius: 4px; cursor: pointer;">💡 提示</button>
+        <button id="pause-btn" onclick="togglePause()" style="padding: 4px 12px; margin-left: 0.5rem; background: #666; color: #fff; border: none; border-radius: 4px; cursor: pointer;">⏸ 暂停</button>
+        <button id="mute-btn" onclick="toggleMute()" style="padding: 4px 12px; margin-left: 0.5rem; background: #666; color: #fff; border: none; border-radius: 4px; cursor: pointer;">🔊</button>
     </div>
-    <canvas id="game-canvas"></canvas>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+    </div>
     <div id="status">滑动或点击交换相邻宝石，三连消除得分！</div>
     <div id="combo-display"></div>
     <div id="game-over">
         <h2>游戏结束!</h2>
         <p>最终得分: <span id="final-score">0</span></p>
         <button onclick="restartGame()">重新开始</button>
+    </div>
+    <div id="pause-overlay">
+        <h2>⏸ 游戏暂停</h2>
+        <button class="resume-btn" onclick="togglePause()">▶ 继续游戏</button>
+        <button class="restart-btn" onclick="restartFromPause()">🔄 重新开始</button>
+    </div>
+    <div id="tutorial-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200;">
+        <h2 style="font-size:2rem;margin-bottom:1rem;">🎮 欢迎来到 Matrix Match-3</h2>
+        <div style="text-align:left;font-size:1.1rem;line-height:2;max-width:400px;">
+            <p>👉 <b>点击</b>一个宝石，再点击相邻宝石交换</p>
+            <p>👉 <b>滑动</b>宝石到相邻位置也可以交换</p>
+            <p>💎 三个或更多相同宝石连成一线即可消除</p>
+            <p>⭐ 四连产生<b>条纹宝石</b>，五连产生<b>彩虹宝石</b></p>
+            <p>🔥 连续消除触发<b>连击加成</b>！</p>
+            <p>💡 卡住了？点击<b>提示</b>按钮</p>
+        </div>
+        <button onclick="dismissTutorial()" style="margin-top:1.5rem;padding:12px 40px;font-size:1.2rem;background:#4488ff;color:#fff;border:none;border-radius:8px;cursor:pointer;">开始游戏</button>
     </div>
 
     <script src="audio-system.js"></script>
@@ -118,9 +179,11 @@
     // Initialize managers
     const audioManager = new AudioManager();
     const sessionManager = new SessionManager();
-    const responsiveManager = new ResponsiveManager(gameCanvas, gameCanvas.parentElement);
+    const responsiveManager = new ResponsiveManager(gameCanvas, document.getElementById('game-container'));
     const touchFeedback = new TouchFeedback(gameCanvas);
     const animationManager = new AnimationManager();
+    // IS-23: 动画帧触发持续渲染
+    animationManager.onFrame = () => { drawBoard(); };
     const scorePopups = [];
     
     // ISSUE-15: devicePixelRatio 适配高 DPI 屏幕
@@ -142,16 +205,6 @@
     let selectedGem = null;
     let isProcessing = false;
     let gameOver = false;
-
-    // Try to load saved game
-    const savedState = sessionManager.loadGameState();
-    if (savedState && !savedState.gameOver) {
-        board = savedState.board;
-        score = savedState.score;
-        movesLeft = savedState.movesLeft;
-        comboCount = savedState.comboCount;
-        console.log('[Game] 已恢复存档');
-    }
 
     // ============================================================
     // Gem class with special types
@@ -415,6 +468,18 @@
     // Init board
     // ============================================================
     function initBoard() {
+        // Try to load saved game first
+        const savedState = sessionManager.loadGameState();
+        if (savedState && !savedState.gameOver) {
+            board = savedState.board;
+            score = savedState.score;
+            movesLeft = savedState.movesLeft;
+            comboCount = savedState.comboCount;
+            console.log('[Game] 已恢复存档');
+            return; // Don't initialize new board
+        }
+        
+        // No save or game was over, create new board
         board = [];
         for (let c = 0; c < COLS; c++) {
             board[c] = [];
@@ -447,9 +512,41 @@
             for (let r = 0; r < ROWS; r++) {
                 const gem = board[c]?.[r];
                 if (!gem) continue;
-                const x = PAD + c * CELL + CELL / 2;
-                const y = PAD + (ROWS - 1 - r) * CELL + CELL / 2;
+                // Use displayX/displayY for animation if available, otherwise use grid position
+                // Both displayX and displayY are in pixel coordinates
+                let x, y;
+                if (gem.displayX !== null && gem.displayX !== undefined) {
+                    x = gem.displayX;
+                } else {
+                    x = PAD + c * CELL + CELL / 2;
+                }
+                if (gem.displayY !== null && gem.displayY !== undefined) {
+                    y = gem.displayY;
+                } else {
+                    y = PAD + (ROWS - 1 - r) * CELL + CELL / 2;
+                }
                 const radius = CELL / 2 - 8;
+
+                // Save context for transformations
+                ctx.save();
+                
+                // Apply rotation if present
+                if (gem.rotation !== null && gem.rotation !== undefined) {
+                    ctx.translate(x, y);
+                    ctx.rotate(gem.rotation);
+                    ctx.translate(-x, -y);
+                }
+                
+                // Apply scale if present (for squash/stretch)
+                if (gem.scaleX !== null && gem.scaleX !== undefined) {
+                    ctx.translate(x, y);
+                    ctx.scale(gem.scaleX, gem.scaleY || 1);
+                    ctx.translate(-x, -y);
+                } else if (gem.scale !== null && gem.scale !== undefined) {
+                    ctx.translate(x, y);
+                    ctx.scale(gem.scale, gem.scale);
+                    ctx.translate(-x, -y);
+                }
 
                 // Matched highlight (fade out)
                 if (gem.isMatched) {
@@ -470,11 +567,14 @@
                     ctx.stroke();
                 }
 
-                drawGemShape(x, y, radius, gem.type, gem.specialType);
+                drawGemShape(x, y, radius, gem.type, gem.specialType, gem.shadow);
                 
                 if (gem.isMatched) {
                     ctx.globalAlpha = 1.0;
                 }
+                
+                // Restore context
+                ctx.restore();
             }
         }
 
@@ -485,22 +585,31 @@
         // Draw particles
         animationManager.renderParticles(ctx);
 
-        // Draw score popups
-        scorePopups.forEach(popup => {
+        // Draw score popups (update and render in one pass, then clean up expired)
+        for (let i = scorePopups.length - 1; i >= 0; i--) {
+            const popup = scorePopups[i];
             if (popup.update()) {
                 popup.render(ctx);
-            }
-        });
-        // Clean up expired popups
-        for (let i = scorePopups.length - 1; i >= 0; i--) {
-            if (!scorePopups[i].update()) {
+            } else {
                 scorePopups.splice(i, 1);
             }
         }
     }
 
-    function drawGemShape(x, y, radius, type, specialType = null) {
+    function drawGemShape(x, y, radius, type, specialType = null, shadow = false) {
         const color = GEM_COLORS[type];
+        
+        // Draw shadow if enabled
+        if (shadow) {
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(x + 3, y + 3, radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+        
         ctx.fillStyle = color;
         ctx.strokeStyle = 'rgba(255,255,255,0.3)';
         ctx.lineWidth = 2;
@@ -664,6 +773,10 @@
             } else {
                 // Invalid swap - play error sound
                 audioManager.playSound('invalid');
+                // Visual feedback: shake the canvas briefly
+                shakeScreen(3);
+                // Flash the invalid gems red
+                flashInvalidGems(gem1, gem2);
                 // Animate swap back
                 await animationManager.animateSwap(gem1, gem2);
                 swapGemsData(gem1, gem2);
@@ -847,19 +960,37 @@
 
     // D2: Screen shake effect for combos
     function shakeScreen(intensity = 5) {
-        const canvas = document.getElementById('game-canvas');
-        const originalTransform = canvas.style.transform;
+        // Save current transform state from ResponsiveManager
+        const savedTransform = gameCanvas.style.transform || 'none';
         let shakeCount = 0;
         const shakeInterval = setInterval(() => {
             const dx = (Math.random() - 0.5) * intensity;
             const dy = (Math.random() - 0.5) * intensity;
-            canvas.style.transform = `translate(${dx}px, ${dy}px)`;
+            gameCanvas.style.transform = `translate(${dx}px, ${dy}px)`;
             shakeCount++;
             if (shakeCount > 10) {
                 clearInterval(shakeInterval);
-                canvas.style.transform = originalTransform;
+                // Restore the transform that ResponsiveManager expects
+                gameCanvas.style.transform = savedTransform;
             }
         }, 30);
+    }
+
+    // Visual feedback for invalid swap: flash gems red
+    function flashInvalidGems(gem1, gem2) {
+        let flashCount = 0;
+        const flashInterval = setInterval(() => {
+            gem1.alpha = flashCount % 2 === 0 ? 0.3 : 1;
+            gem2.alpha = flashCount % 2 === 0 ? 0.3 : 1;
+            drawBoard();
+            flashCount++;
+            if (flashCount >= 4) {
+                clearInterval(flashInterval);
+                gem1.alpha = 1;
+                gem2.alpha = 1;
+                drawBoard();
+            }
+        }, 100);
     }
 
     // D3: Highlight valid moves
@@ -923,10 +1054,57 @@
         gameOver = false;
         selectedGem = null;
         isProcessing = false;
+        // IS-24: 清理残留粒子和动画状态
+        animationManager.clearAll();
+        scorePopups.length = 0;
         document.getElementById('game-over').style.display = 'none';
         initBoard();
         drawBoard();
         updateHUD();
+    }
+
+    let isPaused = false;
+
+    function togglePause() {
+        isPaused = !isPaused;
+        const overlay = document.getElementById('pause-overlay');
+        if (isPaused) {
+            overlay.style.display = 'flex';
+            document.getElementById('pause-btn').textContent = '▶ 继续';
+        } else {
+            overlay.style.display = 'none';
+            document.getElementById('pause-btn').textContent = '⏸ 暂停';
+        }
+    }
+
+    function restartFromPause() {
+        isPaused = false;
+        document.getElementById('pause-overlay').style.display = 'none';
+        document.getElementById('pause-btn').textContent = '⏸ 暂停';
+        restartGame();
+    }
+
+    function toggleMute() {
+        audioManager.toggleMute();
+        const btn = document.getElementById('mute-btn');
+        btn.textContent = audioManager.isMuted ? '🔇' : '🔊';
+    }
+
+    function dismissTutorial() {
+        document.getElementById('tutorial-overlay').style.display = 'none';
+        // Save that tutorial has been shown
+        try { localStorage.setItem('matrix-match3-tutorial-shown', 'true'); } catch(e) {}
+    }
+
+    // Show tutorial on first visit
+    function checkTutorial() {
+        try {
+            if (localStorage.getItem('matrix-match3-tutorial-shown') === 'true') {
+                document.getElementById('tutorial-overlay').style.display = 'none';
+            }
+        } catch(e) {
+            // If localStorage fails, just show tutorial
+        }
     }
 
     function updateHUD() {
@@ -956,16 +1134,21 @@
     let touchStartPos = null;
     let touchStartGem = null;
 
-    canvas.addEventListener('pointerdown', (e) => {
-        if (isProcessing || gameOver) return;
+    gameCanvas.addEventListener('pointerdown', (e) => {
+        if (isProcessing || gameOver || isPaused) return;
         const rect = gameCanvas.getBoundingClientRect();
-        const px = e.clientX - rect.left;
-        const py = e.clientY - rect.top;
+        // Convert screen coordinates to canvas coordinates (accounting for responsive scaling)
+        const canvasCoords = responsiveManager.screenToCanvas(e.clientX, e.clientY);
+        const px = canvasCoords.x;
+        const py = canvasCoords.y;
         const gem = getGemAt(px, py);
         if (!gem) return;
 
         touchStartPos = { x: px, y: py };
         touchStartGem = gem;
+        
+        // 开始拖拽动画
+        animationManager.startDrag(gem, px, py);
 
         if (selectedGem && areAdjacent(selectedGem, gem)) {
             attemptSwap(selectedGem, gem);
@@ -975,11 +1158,16 @@
         }
     });
 
-    canvas.addEventListener('pointermove', (e) => {
-        if (!touchStartGem || !touchStartPos || isProcessing || gameOver) return;
-        const rect = gameCanvas.getBoundingClientRect();
-        const px = e.clientX - rect.left;
-        const py = e.clientY - rect.top;
+    gameCanvas.addEventListener('pointermove', (e) => {
+        if (!touchStartGem || !touchStartPos || isProcessing || gameOver || isPaused) return;
+        // Convert screen coordinates to canvas coordinates (accounting for responsive scaling)
+        const canvasCoords = responsiveManager.screenToCanvas(e.clientX, e.clientY);
+        const px = canvasCoords.x;
+        const py = canvasCoords.y;
+        
+        // 更新拖拽动画
+        animationManager.updateDrag(touchStartGem, px, py);
+        
         const dx = px - touchStartPos.x;
         const dy = py - touchStartPos.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -995,6 +1183,8 @@
             const target = board[targetCol]?.[targetRow] || null;
             if (target) {
                 const gem = touchStartGem;
+                // 结束拖拽动画
+                animationManager.endDrag(gem);
                 touchStartGem = null;
                 touchStartPos = null;
                 selectedGem = null;
@@ -1003,13 +1193,13 @@
         }
     });
 
-    canvas.addEventListener('pointerup', () => {
+    gameCanvas.addEventListener('pointerup', () => {
         touchStartPos = null;
         // Don't clear touchStartGem here to allow tap-to-select
     });
 
     // ISSUE-16: Handle pointer release outside canvas
-    canvas.addEventListener('pointerleave', () => {
+    gameCanvas.addEventListener('pointerleave', () => {
         touchStartPos = null;
         // Keep touchStartGem for tap-to-select, but clear swipe state
     });
@@ -1030,6 +1220,15 @@
     // ============================================================
     // Start
     // ============================================================
+    // Ensure callback functions are available on the global window for inline handlers
+    window.dismissTutorial = dismissTutorial;
+    window.togglePause = togglePause;
+    window.restartFromPause = restartFromPause;
+    window.toggleMute = toggleMute;
+    window.showHint = showHint;
+    window.restartGame = restartGame;
+
+    checkTutorial();
     initBoard();
     drawBoard();
     updateHUD();

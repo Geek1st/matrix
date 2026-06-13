@@ -2,8 +2,12 @@ import { Node, Vec3, tween, Label, Color, UITransform, instantiate, Prefab } fro
 
 /**
  * 视觉特效工具类 — 静态方法，播放 Match-3 动画特效
+ * IS-24: 追踪活跃特效节点，支持 cleanup 防止残留
  */
 export class MatchEffects {
+
+    /** 活跃的特效节点集合（用于清理） */
+    private static _activeEffects: Set<Node> = new Set();
 
     /**
      * 播放消除特效
@@ -14,6 +18,9 @@ export class MatchEffects {
         effect.setScale(0.3, 0.3, 1);
         parentNode.addChild(effect);
 
+        // 追踪
+        this._activeEffects.add(effect);
+
         // 简单圆形指示 (用白色 Label 模拟)
         const label = effect.addComponent(Label);
         label.string = '✨';
@@ -23,7 +30,10 @@ export class MatchEffects {
         tween(effect)
             .to(0.3, { scale: new Vec3(1.2, 1.2, 1) })
             .to(0.2, { scale: new Vec3(0, 0, 1) })
-            .call(() => effect.destroy())
+            .call(() => {
+                this._activeEffects.delete(effect);
+                if (effect.isValid) effect.destroy();
+            })
             .start();
     }
 
@@ -40,6 +50,9 @@ export class MatchEffects {
         textNode.setPosition(position.x, position.y + 40, 0);
         parentNode.addChild(textNode);
 
+        // 追踪
+        this._activeEffects.add(textNode);
+
         const label = textNode.addComponent(Label);
         label.string = `${comboCount} COMBO!\n+${score}`;
         label.fontSize = 28;
@@ -49,8 +62,24 @@ export class MatchEffects {
         tween(textNode)
             .to(0.8, { position: new Vec3(position.x, position.y + 120, 0) }, { easing: 'sineOut' })
             .to(0.3, { scale: new Vec3(0.5, 0.5, 1) })
-            .call(() => textNode.destroy())
+            .call(() => {
+                this._activeEffects.delete(textNode);
+                if (textNode.isValid) textNode.destroy();
+            })
             .start();
+    }
+
+    /**
+     * IS-24: 清除所有活跃特效（场景重置/游戏结束时调用）
+     */
+    static clearAllEffects(): void {
+        for (const node of this._activeEffects) {
+            if (node && node.isValid) {
+                tween(node).stop();
+                node.destroy();
+            }
+        }
+        this._activeEffects.clear();
     }
 
     /**

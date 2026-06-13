@@ -55,16 +55,20 @@ class ResponsiveManager {
     }
 
     applyScale() {
-        this.canvas.style.transform = `scale(${this.currentScale})`;
-        this.canvas.style.transformOrigin = 'top left';
+        // Get the original canvas CSS dimensions (set in demo.html)
+        const originalWidth = parseFloat(this.canvas.style.width);
+        const originalHeight = parseFloat(this.canvas.style.height);
         
-        // Adjust container size to match scaled canvas
-        const scaledWidth = this.canvas.offsetWidth * this.currentScale;
-        const scaledHeight = this.canvas.offsetHeight * this.currentScale;
+        // Set CSS width/height to scaled dimensions so layout box matches visual size
+        this.canvas.style.width = `${originalWidth * this.currentScale}px`;
+        this.canvas.style.height = `${originalHeight * this.currentScale}px`;
+        
+        // No transform needed - CSS dimensions handle the sizing
+        this.canvas.style.transform = 'none';
         
         if (this.container) {
-            this.container.style.width = `${scaledWidth}px`;
-            this.container.style.height = `${scaledHeight}px`;
+            this.container.style.width = 'auto';
+            this.container.style.height = 'auto';
         }
     }
 

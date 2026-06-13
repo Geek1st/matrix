@@ -7,15 +7,78 @@ class AnimationManager {
     constructor() {
         this.activeAnimations = [];
         this.particles = [];
+        this.trails = []; // 拖尾效果
+        this.shockwaves = []; // 冲击波效果
+        this.glowEffects = []; // 光晕效果
+        this.onFrame = null; // IS-23: 渲染回调，由 demo.html 设置为 drawBoard
+        this._framePending = false; // IS-23: 防止同一帧重复渲染
     }
 
-    // B1: Swap animation - smooth position interpolation
+    // IS-24: 清除所有动画状态（游戏重置时调用）
+    clearAll() {
+        this.activeAnimations = [];
+        this.particles = [];
+        this.trails = [];
+        this.shockwaves = [];
+        this.glowEffects = [];
+    }
+
+    // IS-23: 通知渲染层刷新 (去重：同一帧内只触发一次 drawBoard)
+    _requestFrame() {
+        if (this._framePending) return;
+        this._framePending = true;
+        requestAnimationFrame(() => {
+            this._framePending = false;
+            if (this.onFrame) this.onFrame();
+        });
+    }
+
+    // 拖拽跟随动画 - 实时更新宝石位置
+    startDrag(gem, startX, startY) {
+        gem.isDragging = true;
+        gem.dragStartX = startX;
+        gem.dragStartY = startY;
+        gem.displayX = startX;
+        gem.displayY = startY;
+        gem.scale = 1.1; // 拖拽时略微放大
+        gem.shadow = true; // 显示阴影
+    }
+
+    updateDrag(gem, currentX, currentY) {
+        if (!gem.isDragging) return;
+        
+        // 添加拖尾效果
+        this.trails.push({
+            x: currentX,
+            y: currentY,
+            radius: 20,
+            alpha: 0.5,
+            color: GEM_COLORS[gem.type],
+            life: 1
+        });
+        
+        gem.displayX = currentX;
+        gem.displayY = currentY;
+    }
+
+    endDrag(gem) {
+        gem.isDragging = false;
+        gem.scale = null;
+        gem.shadow = false;
+        gem.displayX = null;
+        gem.displayY = null;
+    }
+
+    // B1: Swap animation - smooth position interpolation with rotation
+    // Uses pixel coordinates for displayX/displayY (consistent with drawBoard)
     animateSwap(gem1, gem2, duration = 250) {
         return new Promise(resolve => {
-            const startPos1 = { x: gem1.x, y: gem1.y };
-            const startPos2 = { x: gem2.x, y: gem2.y };
-            const endPos1 = { x: gem2.x, y: gem2.y };
-            const endPos2 = { x: gem1.x, y: gem1.y };
+            // Convert grid positions to pixel coordinates
+            const PAD = 4, CELL = 80, ROWS = 6;
+            const startPx1 = { x: PAD + gem1.x * CELL + CELL / 2, y: PAD + (ROWS - 1 - gem1.y) * CELL + CELL / 2 };
+            const startPx2 = { x: PAD + gem2.x * CELL + CELL / 2, y: PAD + (ROWS - 1 - gem2.y) * CELL + CELL / 2 };
+            const endPx1 = { x: PAD + gem2.x * CELL + CELL / 2, y: PAD + (ROWS - 1 - gem2.y) * CELL + CELL / 2 };
+            const endPx2 = { x: PAD + gem1.x * CELL + CELL / 2, y: PAD + (ROWS - 1 - gem1.y) * CELL + CELL / 2 };
             
             const startTime = Date.now();
             
@@ -24,19 +87,34 @@ class AnimationManager {
                 const progress = Math.min(elapsed / duration, 1);
                 const eased = this.easeOutCubic(progress);
                 
-                // Interpolate positions
-                gem1.displayX = startPos1.x + (endPos1.x - startPos1.x) * eased;
-                gem1.displayY = startPos1.y + (endPos1.y - startPos1.y) * eased;
-                gem2.displayX = startPos2.x + (endPos2.x - startPos2.x) * eased;
-                gem2.displayY = startPos2.y + (endPos2.y - startPos2.y) * eased;
+                // Interpolate pixel positions
+                gem1.displayX = startPx1.x + (endPx1.x - startPx1.x) * eased;
+                gem1.displayY = startPx1.y + (endPx1.y - startPx1.y) * eased;
+                gem2.displayX = startPx2.x + (endPx2.x - startPx2.x) * eased;
+                gem2.displayY = startPx2.y + (endPx2.y - startPx2.y) * eased;
+                
+                // Add rotation during swap
+                gem1.rotation = eased * Math.PI * 0.5;
+                gem2.rotation = -eased * Math.PI * 0.5;
+                
+                // Scale pulse in the middle
+                const pulse = Math.sin(progress * Math.PI);
+                gem1.scale = 1 + pulse * 0.15;
+                gem2.scale = 1 + pulse * 0.15;
                 
                 if (progress < 1) {
                     requestAnimationFrame(animate);
+                    this._requestFrame(); // IS-23: 触发渲染刷新
                 } else {
                     gem1.displayX = null;
                     gem1.displayY = null;
+                    gem1.rotation = null;
+                    gem1.scale = null;
                     gem2.displayX = null;
                     gem2.displayY = null;
+                    gem2.rotation = null;
+                    gem2.scale = null;
+                    this._requestFrame(); // IS-23: 最终帧渲染
                     resolve();
                 }
             };
@@ -45,11 +123,12 @@ class AnimationManager {
         });
     }
 
-    // B2: Fall animation - gravity + bounce
+    // B2: Fall animation - gravity + bounce + squash/stretch
     animateFall(gem, fromY, toY, duration = 300) {
         return new Promise(resolve => {
             const startTime = Date.now();
             const distance = toY - fromY;
+            const isDownward = distance > 0;
             
             const animate = () => {
                 const elapsed = Date.now() - startTime;
@@ -58,10 +137,31 @@ class AnimationManager {
                 
                 gem.displayY = fromY + distance * eased;
                 
+                // Squash and stretch effect
+                // Stretch when falling fast, squash when landing
+                const velocity = this.easeOutBounce(Math.min(progress + 0.05, 1)) - eased;
+                const stretchFactor = Math.abs(velocity) * 8;
+                
+                if (progress < 0.85) {
+                    // Stretch vertically while falling
+                    gem.scaleX = 1 - stretchFactor * 0.3;
+                    gem.scaleY = 1 + stretchFactor * 0.5;
+                } else {
+                    // Squash when landing
+                    const landProgress = (progress - 0.85) / 0.15;
+                    const squashAmount = Math.sin(landProgress * Math.PI) * 0.2;
+                    gem.scaleX = 1 + squashAmount;
+                    gem.scaleY = 1 - squashAmount;
+                }
+                
                 if (progress < 1) {
                     requestAnimationFrame(animate);
+                    this._requestFrame(); // IS-23
                 } else {
                     gem.displayY = null;
+                    gem.scaleX = null;
+                    gem.scaleY = null;
+                    this._requestFrame(); // IS-23: 最终帧渲染
                     resolve();
                 }
             };
@@ -70,27 +170,64 @@ class AnimationManager {
         });
     }
 
-    // B3: Match explosion effect - particles + scale/fade
-    animateExplosion(x, y, color, duration = 400) {
+    // B3: Match explosion effect - enhanced particles + shockwave + glow
+    animateExplosion(x, y, color, duration = 500) {
         return new Promise(resolve => {
-            const particleCount = 12;
+            const particleCount = 20; // 增加粒子数量
             const particles = [];
+            const startTime = Date.now();
             
+            // 创建主爆炸粒子
             for (let i = 0; i < particleCount; i++) {
                 const angle = (Math.PI * 2 * i) / particleCount;
-                const speed = 2 + Math.random() * 2;
+                const speed = 3 + Math.random() * 3;
                 particles.push({
                     x, y,
                     vx: Math.cos(angle) * speed,
                     vy: Math.sin(angle) * speed,
-                    radius: 3 + Math.random() * 2,
+                    radius: 4 + Math.random() * 3,
                     color,
                     alpha: 1,
-                    life: 1
+                    life: 1,
+                    type: 'main'
                 });
             }
             
-            const startTime = Date.now();
+            // 创建火花粒子（更小更快）
+            for (let i = 0; i < 15; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 5 + Math.random() * 4;
+                particles.push({
+                    x, y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    radius: 2 + Math.random() * 2,
+                    color: '#ffffff',
+                    alpha: 1,
+                    life: 1,
+                    type: 'spark'
+                });
+            }
+            
+            // 添加冲击波效果
+            this.shockwaves.push({
+                x, y,
+                radius: 0,
+                maxRadius: 60,
+                alpha: 0.8,
+                color,
+                startTime
+            });
+            
+            // 添加光晕效果
+            this.glowEffects.push({
+                x, y,
+                radius: 30,
+                alpha: 1,
+                color,
+                startTime,
+                duration: 300
+            });
             
             const animate = () => {
                 const elapsed = Date.now() - startTime;
@@ -99,15 +236,23 @@ class AnimationManager {
                 particles.forEach(p => {
                     p.x += p.vx;
                     p.y += p.vy;
-                    p.vy += 0.1; // gravity
+                    p.vy += 0.15; // 增强重力
+                    p.vx *= 0.98; // 空气阻力
                     p.life = 1 - progress;
                     p.alpha = p.life;
-                    p.radius *= 0.98;
+                    p.radius *= 0.97;
+                    
+                    // 火花粒子消失更快
+                    if (p.type === 'spark') {
+                        p.alpha = p.life * 0.8;
+                    }
                 });
                 
                 if (progress < 1) {
                     requestAnimationFrame(animate);
+                    this._requestFrame(); // IS-23
                 } else {
+                    this._requestFrame(); // IS-23: 最终帧渲染
                     resolve();
                 }
             };
@@ -137,8 +282,10 @@ class AnimationManager {
                 
                 if (progress < 1) {
                     requestAnimationFrame(animate);
+                    this._requestFrame(); // IS-23
                 } else {
                     gem.scale = null;
+                    this._requestFrame(); // IS-23: 最终帧渲染
                     resolve();
                 }
             };
@@ -171,17 +318,103 @@ class AnimationManager {
         }
     }
 
-    // Render particles
+    // Render particles with enhanced effects
     renderParticles(ctx) {
-        this.particles.forEach(p => {
+        // 渲染拖尾效果
+        this.trails.forEach((trail, index) => {
+            trail.life -= 0.05;
+            if (trail.life <= 0) {
+                this.trails.splice(index, 1);
+                return;
+            }
             ctx.save();
-            ctx.globalAlpha = p.alpha;
-            ctx.fillStyle = p.color;
+            ctx.globalAlpha = trail.alpha * trail.life;
+            ctx.fillStyle = trail.color;
             ctx.beginPath();
-            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.arc(trail.x, trail.y, trail.radius * trail.life, 0, Math.PI * 2);
             ctx.fill();
             ctx.restore();
         });
+        
+        // 渲染冲击波效果
+        this.shockwaves.forEach((wave, index) => {
+            const elapsed = Date.now() - wave.startTime;
+            const progress = elapsed / 400; // 400ms duration
+            
+            if (progress >= 1) {
+                this.shockwaves.splice(index, 1);
+                return;
+            }
+            
+            wave.radius = wave.maxRadius * progress;
+            wave.alpha = 0.8 * (1 - progress);
+            
+            ctx.save();
+            ctx.globalAlpha = wave.alpha;
+            ctx.strokeStyle = wave.color;
+            ctx.lineWidth = 3 * (1 - progress);
+            ctx.beginPath();
+            ctx.arc(wave.x, wave.y, wave.radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        });
+        
+        // 渲染光晕效果
+        this.glowEffects.forEach((glow, index) => {
+            const elapsed = Date.now() - glow.startTime;
+            const progress = elapsed / glow.duration;
+            
+            if (progress >= 1) {
+                this.glowEffects.splice(index, 1);
+                return;
+            }
+            
+            const currentAlpha = glow.alpha * (1 - progress);
+            const currentRadius = glow.radius * (1 + progress * 0.5);
+            
+            ctx.save();
+            ctx.globalAlpha = currentAlpha;
+            const gradient = ctx.createRadialGradient(glow.x, glow.y, 0, glow.x, glow.y, currentRadius);
+            gradient.addColorStop(0, glow.color);
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(glow.x, glow.y, currentRadius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        });
+        
+        // 渲染主粒子和火花 (IS-24: 同时清理过期粒子)
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            if (p.life <= 0 || p.alpha <= 0) {
+                this.particles.splice(i, 1);
+                continue;
+            }
+            ctx.save();
+            ctx.globalAlpha = p.alpha;
+            
+            if (p.type === 'spark') {
+                // 火花粒子 - 白色发光效果
+                const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius);
+                gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+                gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                // 主粒子 - 带发光效果
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = p.color;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            ctx.restore();
+        }
     }
 
     hasActiveAnimations() {

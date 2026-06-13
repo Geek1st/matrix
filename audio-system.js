@@ -23,12 +23,14 @@ class AudioManager {
 
     createSounds() {
         // Define sound generators for each effect
+        // 使用柔和波形：sine（正弦波）和 triangle（三角波）
+        // 降低高频，增加 attack 时间让声音更平滑
         this.sounds = {
-            swap: { type: 'sine', frequency: 400, duration: 0.1, attack: 0.01, decay: 0.05 },
-            match: { type: 'sine', frequency: 600, duration: 0.15, attack: 0.01, decay: 0.08 },
-            combo: { type: 'square', frequency: 800, duration: 0.2, attack: 0.01, decay: 0.1 },
-            invalid: { type: 'sawtooth', frequency: 200, duration: 0.1, attack: 0.01, decay: 0.05 },
-            gameover: { type: 'sine', frequency: 300, duration: 0.5, attack: 0.01, decay: 0.4 }
+            swap: { type: 'sine', frequency: 350, duration: 0.12, attack: 0.02, decay: 0.06 },
+            match: { type: 'sine', frequency: 520, duration: 0.18, attack: 0.02, decay: 0.10 },
+            combo: { type: 'triangle', frequency: 600, duration: 0.25, attack: 0.03, decay: 0.15 },
+            invalid: { type: 'sine', frequency: 180, duration: 0.15, attack: 0.03, decay: 0.08 },
+            gameover: { type: 'sine', frequency: 280, duration: 0.6, attack: 0.05, decay: 0.45 }
         };
     }
 
