@@ -480,6 +480,11 @@
         }
         
         // No save or game was over, create new board
+        initBoardNew();
+    }
+    
+    // 创建全新棋盘（不恢复存档）
+    function initBoardNew() {
         board = [];
         for (let c = 0; c < COLS; c++) {
             board[c] = [];
@@ -564,6 +569,17 @@
                     ctx.lineWidth = 3;
                     ctx.beginPath();
                     ctx.arc(x, y, radius + 4, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                // Hint highlight (pulsing yellow ring)
+                if (hintHighlight && Date.now() < hintHighlight.endTime &&
+                    (gem === hintHighlight.gem1 || gem === hintHighlight.gem2)) {
+                    const pulse = 0.6 + 0.4 * Math.sin(Date.now() * 0.01);
+                    ctx.strokeStyle = `rgba(255, 215, 0, ${pulse})`;
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius + 6, 0, Math.PI * 2);
                     ctx.stroke();
                 }
 
@@ -1009,7 +1025,9 @@
     }
 
     // D4: Show hint button functionality
+    let hintHighlight = null; // { gem1, gem2, endTime }
     function showHint() {
+        if (isProcessing || gameOver || isPaused) return;
         const validMoves = DeadlockChecker.findValidMoves(board);
         if (validMoves.length === 0) {
             document.getElementById('status').textContent = '没有可用的提示！';
@@ -1017,26 +1035,13 @@
         }
         
         const hintMove = validMoves[Math.floor(Math.random() * validMoves.length)];
-        const gem1 = hintMove.gem1;
-        const gem2 = hintMove.gem2;
-        
-        // Flash the gems
-        const originalAlpha1 = gem1.alpha || 1;
-        const originalAlpha2 = gem2.alpha || 1;
-        
-        let flashCount = 0;
-        const flashInterval = setInterval(() => {
-            gem1.alpha = flashCount % 2 === 0 ? 0.5 : 1;
-            gem2.alpha = flashCount % 2 === 0 ? 0.5 : 1;
-            drawBoard();
-            flashCount++;
-            if (flashCount >= 6) {
-                clearInterval(flashInterval);
-                gem1.alpha = originalAlpha1;
-                gem2.alpha = originalAlpha2;
-                drawBoard();
-            }
-        }, 200);
+        // Use highlight instead of alpha (drawBoard doesn't read gem.alpha)
+        hintHighlight = {
+            gem1: hintMove.gem1,
+            gem2: hintMove.gem2,
+            endTime: Date.now() + 1500
+        };
+        document.getElementById('status').textContent = '💡 高亮的宝石可以交换！';
     }
 
     function checkGameOver() {
@@ -1047,18 +1052,23 @@
         }
     }
 
-    function restartGame() {
+    function restartGame(skipSave) {
         score = 0;
         movesLeft = MAX_MOVES;
         comboCount = 0;
         gameOver = false;
         selectedGem = null;
         isProcessing = false;
+        hintHighlight = null;
         // IS-24: 清理残留粒子和动画状态
         animationManager.clearAll();
         scorePopups.length = 0;
         document.getElementById('game-over').style.display = 'none';
-        initBoard();
+        // Clear saved state so initBoard creates a fresh board
+        if (skipSave) {
+            sessionManager.clearSave();
+        }
+        initBoardNew();
         drawBoard();
         updateHUD();
     }
@@ -1081,7 +1091,9 @@
         isPaused = false;
         document.getElementById('pause-overlay').style.display = 'none';
         document.getElementById('pause-btn').textContent = '⏸ 暂停';
-        restartGame();
+        restartGame(true); // skipSave: force new board, don't restore saved state
+        // Show tutorial again on restart
+        document.getElementById('tutorial-overlay').style.display = 'flex';
     }
 
     function toggleMute() {
@@ -1092,8 +1104,6 @@
 
     function dismissTutorial() {
         document.getElementById('tutorial-overlay').style.display = 'none';
-        // Save that tutorial has been shown
-        try { localStorage.setItem('matrix-match3-tutorial-shown', 'true'); } catch(e) {}
     }
 
     // Show tutorial on first visit

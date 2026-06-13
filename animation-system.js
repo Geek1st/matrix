@@ -33,13 +33,20 @@ class AnimationManager {
         });
     }
 
-    // 拖拽跟随动画 - 实时更新宝石位置
+    // 拖拽跟随动画 - 宝石跟随手指移动
+    // startX/startY 是触摸点坐标（canvas 逻辑坐标）
+    // 宝石直接跟随手指，保持手指在宝石上的相对位置不变
     startDrag(gem, startX, startY) {
         gem.isDragging = true;
-        gem.dragStartX = startX;
-        gem.dragStartY = startY;
-        gem.displayX = startX;
-        gem.displayY = startY;
+        // 宝石的网格中心坐标（像素）
+        const gridCenterX = 4 + gem.x * 80 + 40;
+        const gridCenterY = 4 + (5 - gem.y) * 80 + 40;
+        // 保存手指相对于宝石中心的偏移
+        gem.dragOffsetX = startX - gridCenterX;
+        gem.dragOffsetY = startY - gridCenterY;
+        // 初始位置：手指位置 - 偏移 = 网格中心（不跳变）
+        gem.displayX = startX - gem.dragOffsetX;
+        gem.displayY = startY - gem.dragOffsetY;
         gem.scale = 1.1; // 拖拽时略微放大
         gem.shadow = true; // 显示阴影
     }
@@ -47,18 +54,22 @@ class AnimationManager {
     updateDrag(gem, currentX, currentY) {
         if (!gem.isDragging) return;
         
-        // 添加拖尾效果
+        // 宝石中心 = 当前手指位置 - 偏移量
+        gem.displayX = currentX - gem.dragOffsetX;
+        gem.displayY = currentY - gem.dragOffsetY;
+        
+        // 添加拖尾效果（在宝石中心位置）
         this.trails.push({
-            x: currentX,
-            y: currentY,
+            x: gem.displayX,
+            y: gem.displayY,
             radius: 20,
             alpha: 0.5,
             color: GEM_COLORS[gem.type],
             life: 1
         });
         
-        gem.displayX = currentX;
-        gem.displayY = currentY;
+        // 触发渲染刷新，让拖拽视觉实时更新
+        this._requestFrame();
     }
 
     endDrag(gem) {
@@ -67,6 +78,8 @@ class AnimationManager {
         gem.shadow = false;
         gem.displayX = null;
         gem.displayY = null;
+        gem.dragOffsetX = null;
+        gem.dragOffsetY = null;
     }
 
     // B1: Swap animation - smooth position interpolation with rotation

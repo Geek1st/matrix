@@ -14,6 +14,10 @@ class ResponsiveManager {
         this.currentScale = 1;
         this.isMobileDevice = this.detectMobile();
         
+        // Store original canvas dimensions (set before ResponsiveManager is created)
+        this.originalWidth = parseFloat(canvas.style.width);
+        this.originalHeight = parseFloat(canvas.style.height);
+        
         this.init();
     }
 
@@ -55,13 +59,10 @@ class ResponsiveManager {
     }
 
     applyScale() {
-        // Get the original canvas CSS dimensions (set in demo.html)
-        const originalWidth = parseFloat(this.canvas.style.width);
-        const originalHeight = parseFloat(this.canvas.style.height);
-        
-        // Set CSS width/height to scaled dimensions so layout box matches visual size
-        this.canvas.style.width = `${originalWidth * this.currentScale}px`;
-        this.canvas.style.height = `${originalHeight * this.currentScale}px`;
+        // Set CSS width/height to scaled dimensions based on ORIGINAL size
+        // Always use this.originalWidth/Height to avoid compounding scale errors
+        this.canvas.style.width = `${this.originalWidth * this.currentScale}px`;
+        this.canvas.style.height = `${this.originalHeight * this.currentScale}px`;
         
         // No transform needed - CSS dimensions handle the sizing
         this.canvas.style.transform = 'none';
@@ -128,8 +129,10 @@ class TouchFeedback {
     init() {
         this.canvas.addEventListener('pointerdown', (e) => {
             const rect = this.canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            // Convert to canvas logical coordinates (500x500 space)
+            const canvasWidth = 6 * 80 + 4 * 2; // COLS * CELL + PAD * 2 = 488
+            const x = (e.clientX - rect.left) / rect.width * canvasWidth;
+            const y = (e.clientY - rect.top) / rect.height * canvasWidth;
             this.addRipple(x, y);
         });
     }
